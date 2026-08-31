@@ -24,7 +24,8 @@ export const SESSION_COOKIE = 'fleet-session';
 export const CSRF_COOKIE = 'fleet-csrf-token';
 export const CSRF_HEADER = 'x-csrf-token';
 
-const CSRF_EXEMPT = new Set(['/login', '/logout', '/api/auth/status', '/health']);
+const CSRF_EXEMPT = new Set(['/login', '/logout', '/api/auth/status', '/health', '/api/auth/refresh']);
+export const REFRESH_COOKIE = 'fleet-refresh';
 
 export interface GatewayOpts {
   identityMode: AuthIdentityMode;
@@ -69,7 +70,10 @@ export class FleetGateway {
     };
   }
 
-  login(username: string, password: string): LoginResponse | { error: string; status: number } {
+  login(
+    username: string,
+    password: string
+  ): (LoginResponse & { refreshToken: string }) | { error: string; status: number } {
     if (username.length > 32 || password.length > 128) {
       return { error: 'invalid credentials length', status: 400 };
     }
@@ -78,8 +82,8 @@ export class FleetGateway {
     }
     const user = this.store.verifyPassword(username, password);
     if (!user) return { error: 'Invalid username or password', status: 401 };
-    const token = this.store.createSession(user);
-    return { success: true, user, token };
+    const { accessToken, refreshToken } = this.store.createSessionPair(user);
+    return { success: true, user, token: accessToken, refreshToken };
   }
 
   /** CSRF check — Local mode always passes; GET/HEAD/OPTIONS pass; exempt paths pass. */
@@ -217,8 +221,30 @@ export class FleetGateway {
         const result = this.login(body.username ?? '', body.password ?? '');
         if ('error' in result) return sendJson(res, result.status, { error: result.error });
         const csrf = randomBytes(24).toString('base64url');
-        setAuthCookies(res, result.token, csrf);
+        setAuthCookies(res, result.token, csrf, result.refreshToken);
         return sendJson(res, 200, { ...result, csrf });
+      }
+
+      if (req.method === 'POST' && path === '/api/auth/refresh') {
+        if (this.identityMode === 'local') {
+          return sendJson(res, 200, {
+            success: true,
+            user: LOCAL_DEFAULT_USER,
+            token: 'local-mode-no-token'
+          });
+        }
+        const body = JSON.parse(await readBody(req)) as { refreshToken?: string };
+        const cookies = parseCookie(req.headers.cookie);
+        const refreshToken = body.refreshToken || cookies[REFRESH_COOKIE] || '';
+        const rotated = this.store.refreshAccess(refreshToken);
+        if (!rotated) return sendJson(res, 401, { error: 'invalid refresh token' });
+        const csrf = randomBytes(24).toString('base64url');
+        setAuthCookies(res, rotated.accessToken, csrf, refreshToken);
+        return sendJson(res, 200, {
+          success: true,
+          user: rotated.user,
+          token: rotated.accessToken
+        });
       }
 
       if (req.method === 'POST' && path === '/logout') {
@@ -306,17 +332,29 @@ function csrfTokensEqual(a: string, b: string): boolean {
   }
 }
 
-function setAuthCookies(res: ServerResponse, token: string, csrf: string): void {
-  res.setHeader('set-cookie', [
+function setAuthCookies(
+  res: ServerResponse,
+  token: string,
+  csrf: string,
+  refreshToken?: string
+): void {
+  const cookies = [
     `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}`,
     `${CSRF_COOKIE}=${encodeURIComponent(csrf)}; Path=/; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}`
-  ]);
+  ];
+  if (refreshToken) {
+    cookies.push(
+      `${REFRESH_COOKIE}=${encodeURIComponent(refreshToken)}; HttpOnly; Path=/api/auth/refresh; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}`
+    );
+  }
+  res.setHeader('set-cookie', cookies);
 }
 
 function clearAuthCookies(res: ServerResponse): void {
   res.setHeader('set-cookie', [
     `${SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0`,
-    `${CSRF_COOKIE}=; Path=/; Max-Age=0`
+    `${CSRF_COOKIE}=; Path=/; Max-Age=0`,
+    `${REFRESH_COOKIE}=; HttpOnly; Path=/api/auth/refresh; Max-Age=0`
   ]);
 }
 

@@ -109,6 +109,28 @@ describe('Gateway userSession auth', () => {
     assert.equal(me.status, 200);
   });
 
+  it('refresh token cannot call ordinary APIs; refresh endpoint issues access', async () => {
+    const login = await gw.handleForTest('POST', '/login', {
+      body: { username: 'frank', password: 'pw-frank-ok' }
+    });
+    const refreshToken = (login.body as { refreshToken: string }).refreshToken;
+    assert.ok(refreshToken?.startsWith('flr_'));
+    const denied = await gw.handleForTest('GET', '/api/me', {
+      headers: { authorization: `Bearer ${refreshToken}` }
+    });
+    assert.equal(denied.status, 401);
+    const refreshed = await gw.handleForTest('POST', '/api/auth/refresh', {
+      body: { refreshToken }
+    });
+    assert.equal(refreshed.status, 200);
+    const access = (refreshed.body as { token: string }).token;
+    assert.ok(access.startsWith('flt_'));
+    const me = await gw.handleForTest('GET', '/api/me', {
+      headers: { authorization: `Bearer ${access}` }
+    });
+    assert.equal(me.status, 200);
+  });
+
   it('auth status reports needsSetup before first user', async () => {
     const status = await gw.handleForTest('GET', '/api/auth/status');
     assert.equal(status.status, 200);

@@ -1,24 +1,26 @@
 /**
- * Headless FleetDaemon — hive/pty/hooks/control control plane (no Electron).
- * Boot: HiveRoot.ensure → HookServer → RuntimeRegistry.ensureLocal → ClaimService.
+ * Headless FleetDaemon — hive/pty/hooks/control + TeamWake + claim/blocker.
  */
 import { hostname } from 'node:os';
 import type { DaemonInfo, HiveTask, PendingDecision, RuntimeRecord } from '@munder/fleet-protocol';
 import { LOCAL_DEFAULT_USER } from '@munder/fleet-protocol';
+import { AutoClaimLoop } from './autoClaim.js';
+import { BlockerService } from './blockerService.js';
 import { ClaimService, type ClaimRecord } from './claimService.js';
 import { ControlRegistry } from './control.js';
 import { BusyError, DecisionGate } from './decisionGate.js';
+import { HiveMailRouter } from './hiveMail.js';
 import { HiveRoot } from './hiveRoot.js';
 import { HiveTaskStore } from './hiveTasks.js';
 import { HookServer } from './hookServer.js';
+import { FleetMetrics } from './metrics.js';
 import { tryCreateNodePtyBackend } from './nodePtyBackend.js';
 import { PtyManager, type PtyBackend, type SpawnOpts } from './ptyManager.js';
 import { RuntimeRegistry, type EnsureLocalOpts } from './runtimeRegistry.js';
+import { TeamWakeScheduler } from './teamWake.js';
 
 export interface FleetDaemonOpts {
-  /** Hive home directory (contains hive/). */
   hiveHome?: string;
-  /** @deprecated prefer hiveHome; still accepted as hive/tasks.json parent. */
   hiveDir?: string;
   projectId?: string;
   daemonId?: string;
@@ -27,9 +29,7 @@ export interface FleetDaemonOpts {
   providers?: EnsureLocalOpts['providers'];
   ptyBackend?: PtyBackend;
   ownerUserId?: string;
-  /** Start HookServer UDS listener (default true when started via start()). */
   enableHooks?: boolean;
-  /** Prefer real node-pty when available (async startAsync). */
   preferNodePty?: boolean;
 }
 
@@ -38,9 +38,14 @@ export class FleetDaemon {
   readonly decisions = new DecisionGate();
   readonly runtimes = new RuntimeRegistry();
   readonly claims: ClaimService;
+  readonly blockers = new BlockerService();
+  readonly team = new TeamWakeScheduler();
+  readonly metrics = new FleetMetrics();
   readonly hive: HiveRoot;
+  readonly mail: HiveMailRouter;
   readonly pty: PtyManager;
   readonly tasks: HiveTaskStore;
+  readonly autoClaim: AutoClaimLoop;
   hooks: HookServer | undefined;
   private info: DaemonInfo | undefined;
   private started = false;
@@ -54,6 +59,12 @@ export class FleetDaemon {
     this.pty = new PtyManager({ backend: opts.ptyBackend });
     this.tasks = new HiveTaskStore(taskDir);
     this.claims = new ClaimService(this.runtimes);
+    this.mail = new HiveMailRouter(this.hive);
+    this.autoClaim = new AutoClaimLoop({
+      claims: this.claims,
+      blockers: this.blockers,
+      listTasks: () => this.tasks.list()
+    });
   }
 
   get daemonInfo(): DaemonInfo | undefined {
@@ -64,7 +75,6 @@ export class FleetDaemon {
     return this.started;
   }
 
-  /** Boot hook — register local runtimes (Multica ensureLocal semantics). */
   start(): { info: DaemonInfo; runtimes: RuntimeRecord[] } {
     if (this.started) {
       return { info: this.info!, runtimes: this.runtimes.list() };
@@ -83,12 +93,20 @@ export class FleetDaemon {
     const daemonId = this.opts.daemonId ?? RuntimeRegistry.newDaemonId();
     const deviceName = this.opts.deviceName ?? hostname();
     const launchedBy = this.opts.launchedBy ?? 'cli';
+    const ownerUserId = this.opts.ownerUserId ?? LOCAL_DEFAULT_USER.id;
     const runtimes = this.runtimes.ensureLocal({
       daemonId,
       deviceName,
       launchedBy,
       providers: this.opts.providers,
-      ownerUserId: this.opts.ownerUserId ?? LOCAL_DEFAULT_USER.id
+      ownerUserId
+    });
+    // Default team: Michael (lead) + local worker slot
+    this.team.upsertAgent({
+      slotId: 'michael',
+      name: 'Michael',
+      role: 'lead',
+      status: 'idle'
     });
     this.info = {
       daemonId,
@@ -97,10 +115,10 @@ export class FleetDaemon {
       startedAt: Date.now()
     };
     this.started = true;
+    this.metrics.event('daemon.start', { daemonId, runtimes: runtimes.length });
     return { info: this.info, runtimes };
   }
 
-  /** Like start(), but optionally attaches real node-pty. */
   async startAsync(): Promise<{ info: DaemonInfo; runtimes: RuntimeRecord[] }> {
     if (this.opts.preferNodePty && !this.opts.ptyBackend) {
       const backend = await tryCreateNodePtyBackend();
@@ -118,6 +136,18 @@ export class FleetDaemon {
     this.runtimes.deregisterAll();
     this.decisions.cancelAll();
     this.started = false;
+    this.metrics.event('daemon.stop');
+  }
+
+  /** Teammate completion → Michael mailbox + optional lead wake id. */
+  completeToMichael(slotId: string, summary?: string): { leadToWake: string | null } {
+    this.ensureStarted();
+    const leadToWake = this.team.markIdle(slotId, summary);
+    this.metrics.event('team.complete', { slotId, leadToWake: leadToWake ?? undefined });
+    if (leadToWake) {
+      this.team.tryWake(leadToWake);
+    }
+    return { leadToWake };
   }
 
   spawnPty(opts: SpawnOpts) {
@@ -127,7 +157,12 @@ export class FleetDaemon {
 
   claimTask(taskId: string, runtimeId: string): ClaimRecord {
     this.ensureStarted();
-    return this.claims.claim(taskId, runtimeId);
+    if (this.blockers.blocksAutoClaim(taskId)) {
+      throw new Error('task blocked — owner must resolve before claim');
+    }
+    const c = this.claims.claim(taskId, runtimeId);
+    this.metrics.event('claim', { taskId, runtimeId });
+    return c;
   }
 
   registerDecision(
@@ -171,5 +206,4 @@ export class FleetDaemon {
   }
 }
 
-// re-export BusyError for callers
 export { BusyError };

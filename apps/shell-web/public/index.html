@@ -13,6 +13,7 @@
       --accent: #3dba7a;
       --danger: #e26d5a;
       --line: #2a3a32;
+      --warn: #d4a017;
     }
     * { box-sizing: border-box; }
     body {
@@ -25,58 +26,43 @@
         radial-gradient(900px 500px at 100% 0%, #243528 0%, transparent 50%),
         linear-gradient(160deg, var(--bg0), var(--bg1));
     }
-    main {
-      max-width: 420px;
-      margin: 0 auto;
-      padding: 18vh 1.25rem 3rem;
-    }
+    main { max-width: 920px; margin: 0 auto; padding: 10vh 1.25rem 3rem; }
     .brand {
-      font-family: "Fraunces", "Iowan Old Style", Georgia, serif;
-      font-size: clamp(2.4rem, 7vw, 3.2rem);
+      font-family: "Fraunces", Georgia, serif;
+      font-size: clamp(2.2rem, 6vw, 3rem);
       letter-spacing: -0.03em;
       margin: 0 0 0.35rem;
       animation: rise 700ms ease both;
     }
-    p.lead {
-      margin: 0 0 1.75rem;
-      color: var(--muted);
-      animation: rise 700ms ease 80ms both;
-    }
-    form, .panel {
-      display: grid;
-      gap: 0.75rem;
-      animation: rise 700ms ease 140ms both;
-    }
+    p.lead { margin: 0 0 1.5rem; color: var(--muted); animation: rise 700ms ease 80ms both; }
+    form.login, .gate { display: grid; gap: 0.75rem; max-width: 420px; animation: rise 700ms ease 140ms both; }
     label { font-size: 0.85rem; color: var(--muted); }
-    input {
-      width: 100%;
-      padding: 0.7rem 0.8rem;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: rgba(255,255,255,0.03);
-      color: var(--ink);
-      font: inherit;
+    input, select {
+      width: 100%; padding: 0.7rem 0.8rem; border: 1px solid var(--line);
+      border-radius: 10px; background: rgba(255,255,255,0.03); color: var(--ink); font: inherit;
     }
     button {
-      margin-top: 0.35rem;
-      border: 0;
-      border-radius: 10px;
-      padding: 0.75rem 1rem;
-      background: var(--accent);
-      color: #062214;
-      font-weight: 650;
-      cursor: pointer;
-      transition: transform 160ms ease, filter 160ms ease;
+      border: 0; border-radius: 10px; padding: 0.7rem 1rem; background: var(--accent);
+      color: #062214; font-weight: 650; cursor: pointer;
     }
-    button:hover { transform: translateY(-1px); filter: brightness(1.05); }
+    button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
     .err { color: var(--danger); min-height: 1.2em; font-size: 0.9rem; }
-    .panel { display: none; }
-    .panel.visible { display: grid; }
-    code { color: var(--accent); }
-    @keyframes rise {
-      from { opacity: 0; transform: translateY(10px); }
-      to { opacity: 1; transform: translateY(0); }
+    .app { display: none; animation: rise 700ms ease both; }
+    .app.visible { display: block; }
+    .bar { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: 1.5rem; }
+    .grid { display: grid; gap: 1.5rem; grid-template-columns: 1.2fr 1fr; }
+    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+    section h2 { font-size: 1rem; margin: 0 0 0.75rem; color: var(--muted); font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
+    .list { display: grid; gap: 0.55rem; }
+    .row {
+      display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; align-items: center;
+      padding: 0.65rem 0; border-bottom: 1px solid var(--line);
     }
+    .row strong { display: block; }
+    .meta { color: var(--muted); font-size: 0.85rem; }
+    .tag { font-size: 0.75rem; color: var(--warn); }
+    .role-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.5rem; margin-top: 0.75rem; }
+    @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
   </style>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -85,79 +71,160 @@
 <body>
   <main>
     <h1 class="brand">Fleet</h1>
-    <p class="lead">鉴权 Web shell · 同一 <code>fleet-gateway</code></p>
-    <form id="login">
+    <p class="lead">看板 · 待定 · 角色 — 同一 <code>fleet-gateway</code></p>
+
+    <form class="login" id="login">
       <label>用户名<input name="username" autocomplete="username" required /></label>
       <label>密码<input name="password" type="password" autocomplete="current-password" required /></label>
       <button type="submit">登录</button>
       <div class="err" id="err"></div>
     </form>
-    <div class="panel" id="panel">
-      <p>已登录：<strong id="who"></strong></p>
-      <p>Gateway：<code id="gw"></code></p>
-      <button type="button" id="logout">退出</button>
+
+    <div class="app" id="app">
+      <div class="bar">
+        <div>
+          <div id="who"></div>
+          <div class="meta">Gateway <code id="gw"></code> · Daemon <code id="daemon"></code></div>
+        </div>
+        <button class="ghost" type="button" id="logout">退出</button>
+      </div>
+      <div class="grid">
+        <section>
+          <h2>Assignee 看板</h2>
+          <div class="list" id="tasks"></div>
+        </section>
+        <section>
+          <h2>待定 PendingDecision</h2>
+          <div class="list" id="pending"></div>
+          <h2 style="margin-top:1.5rem">角色注册</h2>
+          <div class="list" id="roles"></div>
+          <form class="role-form" id="roleForm">
+            <input name="slotId" placeholder="slotId" required />
+            <select name="role"><option value="teammate">teammate</option><option value="lead">lead</option></select>
+            <button type="submit">注册</button>
+          </form>
+        </section>
+      </div>
     </div>
   </main>
   <script>
     const GATEWAY = '__GATEWAY__';
+    const DAEMON = (localStorage.getItem('fleet_daemon') || GATEWAY.replace(':25808', ':3920').replace('/login',''));
     document.getElementById('gw').textContent = GATEWAY;
+    document.getElementById('daemon').textContent = DAEMON;
     const err = document.getElementById('err');
     const form = document.getElementById('login');
-    const panel = document.getElementById('panel');
+    const app = document.getElementById('app');
 
-    async function refreshMe(token) {
-      const res = await fetch(GATEWAY + '/api/me', {
-        headers: token ? { authorization: 'Bearer ' + token } : {},
+    function token() { return sessionStorage.getItem('fleet_token'); }
+    function authHeaders() {
+      const t = token();
+      return t ? { authorization: 'Bearer ' + t } : {};
+    }
+
+    async function api(base, path, opts = {}) {
+      const res = await fetch(base + path, {
+        ...opts,
+        headers: { 'content-type': 'application/json', ...authHeaders(), ...(opts.headers || {}) },
         credentials: 'include'
       });
-      if (!res.ok) return null;
-      return res.json();
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || res.statusText);
+      return body;
+    }
+
+    function showApp(user) {
+      form.style.display = 'none';
+      app.classList.add('visible');
+      document.getElementById('who').textContent = '已登录：' + user.username;
+      refreshBoard();
+    }
+
+    async function refreshBoard() {
+      try {
+        const tasks = await api(DAEMON, '/tasks');
+        const el = document.getElementById('tasks');
+        el.innerHTML = (tasks.tasks || []).map(t =>
+          `<div class="row"><div><strong>${escapeHtml(t.title)}</strong><div class="meta">${escapeHtml(t.id)} · ${escapeHtml(t.status)}</div></div><div class="tag">${escapeHtml(t.assignee || 'unassigned')}</div></div>`
+        ).join('') || '<div class="meta">暂无任务</div>';
+      } catch (e) {
+        document.getElementById('tasks').innerHTML = `<div class="meta">daemon 不可达：${escapeHtml(e.message)}</div>`;
+      }
+      try {
+        // pending via first conversation summary if any decisions registered — list team mailbox as proxy for pending UX
+        const team = await api(DAEMON, '/team');
+        document.getElementById('roles').innerHTML = (team.agents || []).map(a =>
+          `<div class="row"><div><strong>${escapeHtml(a.name || a.slotId)}</strong><div class="meta">${escapeHtml(a.role)} · ${escapeHtml(a.status)}</div></div><div class="tag">${escapeHtml(a.slotId)}</div></div>`
+        ).join('') || '<div class="meta">无角色</div>';
+        const blockers = await api(DAEMON, '/blockers');
+        const pendingBits = (blockers.blockers || []).map(b =>
+          `<div class="row"><div><strong>${escapeHtml(b.reason)}</strong><div class="meta">${escapeHtml(b.taskOrIssueId)} → owner ${escapeHtml(b.ownerUserId)}</div></div><div class="tag">blocker</div></div>`
+        );
+        // Also surface decision summary for default project
+        try {
+          const sum = await api(DAEMON, '/conversations/default/summary');
+          if (sum.pendingConfirmations > 0) {
+            pendingBits.unshift(`<div class="row"><div><strong>waiting_confirmation</strong><div class="meta">${sum.pendingConfirmations} pending · canSend=${sum.canSendMessage}</div></div><div class="tag">decision</div></div>`);
+          }
+        } catch {}
+        document.getElementById('pending').innerHTML = pendingBits.join('') || '<div class="meta">无待定</div>';
+      } catch (e) {
+        document.getElementById('roles').innerHTML = `<div class="meta">${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       err.textContent = '';
       const fd = new FormData(form);
-      const res = await fetch(GATEWAY + '/login', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          username: fd.get('username'),
-          password: fd.get('password')
-        })
-      });
-      const body = await res.json();
-      if (!res.ok) {
-        err.textContent = body.error || '登录失败';
-        return;
+      try {
+        const body = await api(GATEWAY, '/login', {
+          method: 'POST',
+          body: JSON.stringify({ username: fd.get('username'), password: fd.get('password') })
+        });
+        sessionStorage.setItem('fleet_token', body.token);
+        if (body.refreshToken) sessionStorage.setItem('fleet_refresh', body.refreshToken);
+        if (body.csrf) sessionStorage.setItem('fleet_csrf', body.csrf);
+        showApp(body.user);
+      } catch (ex) {
+        err.textContent = ex.message || '登录失败';
       }
-      sessionStorage.setItem('fleet_token', body.token);
-      if (body.csrf) sessionStorage.setItem('fleet_csrf', body.csrf);
-      form.style.display = 'none';
-      panel.classList.add('visible');
-      document.getElementById('who').textContent = body.user.username;
     });
 
     document.getElementById('logout').addEventListener('click', async () => {
-      const token = sessionStorage.getItem('fleet_token');
-      await fetch(GATEWAY + '/logout', {
-        method: 'POST',
-        headers: token ? { authorization: 'Bearer ' + token } : {},
-        credentials: 'include'
-      });
+      try { await api(GATEWAY, '/logout', { method: 'POST' }); } catch {}
       sessionStorage.clear();
       location.reload();
     });
 
+    document.getElementById('roleForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const slotId = String(fd.get('slotId'));
+      await api(DAEMON, '/team/register', {
+        method: 'POST',
+        body: JSON.stringify({
+          slotId,
+          name: slotId,
+          role: fd.get('role'),
+          status: 'idle'
+        })
+      });
+      e.target.reset();
+      refreshBoard();
+    });
+
     (async () => {
-      const token = sessionStorage.getItem('fleet_token');
-      if (!token) return;
-      const me = await refreshMe(token);
-      if (!me) return;
-      form.style.display = 'none';
-      panel.classList.add('visible');
-      document.getElementById('who').textContent = me.user.username;
+      const t = token();
+      if (!t) return;
+      try {
+        const me = await api(GATEWAY, '/api/me');
+        showApp(me.user);
+      } catch {}
     })();
   </script>
 </body>

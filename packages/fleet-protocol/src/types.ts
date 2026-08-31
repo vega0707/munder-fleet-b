@@ -1,0 +1,102 @@
+/** Shared Fleet wire types — Strategy B (Aion/Multica behavioral alignment). */
+
+export type AuthIdentityMode = 'local' | 'userSession';
+
+export interface FleetUser {
+  id: string;
+  username: string;
+}
+
+/** Electron / trusted local process — fixed system user (Aion IdentityMode::Local). */
+export const LOCAL_DEFAULT_USER: FleetUser = {
+  id: 'system_default_user',
+  username: 'system_default_user'
+};
+
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  success: true;
+  user: FleetUser;
+  /** Access token (also set as HttpOnly session cookie for browsers). */
+  token: string;
+}
+
+export interface AuthStatus {
+  success: true;
+  needsSetup: boolean;
+  userCount: number;
+  isAuthenticated: boolean;
+  identityMode: AuthIdentityMode;
+}
+
+export type RuntimeStatus = 'online' | 'offline' | 'runtime_gone';
+
+export interface RuntimeRecord {
+  id: string;
+  daemonId: string;
+  workspaceId?: string;
+  name: string;
+  provider: string;
+  version?: string;
+  status: RuntimeStatus;
+  lastSeenAt: number;
+  ownerUserId: string;
+}
+
+/** Multica claim freshness analogue (seconds). */
+export const RUNTIME_CLAIM_FRESHNESS_MS = 150_000;
+
+export type RuntimeState =
+  | 'idle'
+  | 'starting'
+  | 'running'
+  | 'cancelling'
+  | 'restarting'
+  | 'waiting_confirmation';
+
+export interface PendingDecision {
+  id: string;
+  callId: string;
+  conversationId: string;
+  title?: string;
+  action?: string;
+  description: string;
+  commandType?: string;
+  options: Array<{ label: string; value: unknown; params?: Record<string, string> }>;
+  createdAt: number;
+}
+
+export interface RuntimeSummary {
+  state: RuntimeState;
+  canSendMessage: boolean;
+  isProcessing: boolean;
+  pendingConfirmations: number;
+  turnId?: string;
+  supportsMidturnDelivery: boolean;
+}
+
+export type TaskStatus = 'todo' | 'doing' | 'blocked' | 'done';
+
+/** Munder hive task — assignee must survive status patches. */
+export interface HiveTask {
+  id: string;
+  title: string;
+  description?: string;
+  assignee?: string;
+  status: TaskStatus;
+  dependsOn: string[];
+  priority: number;
+  createdAt: string;
+  result?: string;
+}
+
+export interface DaemonInfo {
+  daemonId: string;
+  deviceName: string;
+  launchedBy: 'electron' | 'cli' | 'test';
+  startedAt: number;
+}

@@ -1,10 +1,10 @@
 # ROADMAP — Strategy B
 
 ## P0
-- 抽出 `fleet-daemon` 无头进程（行为 ≈ 现 Electron main 的 hive/pty）
-- `fleet-gateway`：密码/令牌 session + loopback 免鉴权
-- PendingDecision 硬闸
-- Runtime.ensureLocal()
+- [x] 抽出 `fleet-daemon` 无头进程（行为 ≈ 现 Electron main 的 hive/pty）
+- [x] `fleet-gateway`：密码/令牌 session + Local 身份免鉴权（非 IP 旁路）
+- [x] PendingDecision 硬闸
+- [x] Runtime.ensureLocal()
 
 ## P1
 - TeamWake + 完成回传 Michael（对齐 Aion internals 时序）

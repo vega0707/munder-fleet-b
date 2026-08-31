@@ -34,8 +34,15 @@
 
 ## 成功标准（P0）
 
-- [ ] 从 munder-difflin 抽出可无头运行的 daemon 进程
-- [ ] Web 鉴权（密码/令牌 + 可选 OAuth 白名单）+ Electron 免鉴权
-- [ ] PendingDecision 硬闸
-- [ ] Runtime 自动注册（单节点）+ Task assignee 不变
-- [ ] 文档中 Multica/Aion 对齐项有「行为验收」清单
+- [x] 从 munder-difflin 抽出可无头运行的 daemon 进程（`packages/fleet-daemon`）
+- [x] Web 鉴权（密码/令牌）+ Electron Local 免鉴权（`packages/fleet-gateway`）
+- [x] PendingDecision 硬闸（`DecisionGate`）
+- [x] Runtime 自动注册（单节点）+ Task assignee 不变
+- [x] 行为验收清单：[`docs/ACCEPTANCE.md`](./docs/ACCEPTANCE.md)
+
+```bash
+./scripts/bootstrap.sh   # refs（gitignore）
+npm install && npm test
+npm run daemon --workspace=@munder/fleet-daemon -- --listen 127.0.0.1:3920
+npm run gateway --workspace=@munder/fleet-gateway -- --mode local --daemon http://127.0.0.1:3920
+```

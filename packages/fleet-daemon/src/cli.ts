@@ -8,26 +8,28 @@
 import { createServer } from 'node:http';
 import { FleetDaemon } from './daemon.js';
 import { BusyError, NotFoundError } from './decisionGate.js';
+import { ClaimConflictError, ClaimStaleError } from './claimService.js';
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
-const hiveDir = arg('--hive');
+const hiveHome = arg('--hive');
 const listen = arg('--listen') ?? '127.0.0.1:3920';
 const [host, portStr] = listen.split(':');
 const port = Number(portStr ?? 3920);
 
 const daemon = new FleetDaemon({
-  hiveDir,
+  hiveHome,
   launchedBy: 'cli',
+  preferNodePty: true,
   providers: [
     { name: 'claude', provider: 'claude' },
     { name: 'codex', provider: 'codex' }
   ]
 });
-const { info, runtimes } = daemon.start();
+const { info, runtimes } = await daemon.startAsync();
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${host}:${port}`);
@@ -78,10 +80,25 @@ const server = createServer(async (req, res) => {
       const conversationId = decodeURIComponent(url.pathname.split('/')[2]!);
       return json(200, daemon.decisions.summary(conversationId));
     }
+    if (req.method === 'POST' && url.pathname === '/claims') {
+      const body = JSON.parse(await readBody(req)) as { taskId?: string; runtimeId?: string };
+      return json(200, {
+        claim: daemon.claimTask(body.taskId ?? '', body.runtimeId ?? '')
+      });
+    }
+    if (req.method === 'GET' && url.pathname === '/claims') {
+      return json(200, { claims: daemon.claims.list() });
+    }
+    if (req.method === 'GET' && url.pathname === '/hooks/sock') {
+      return json(200, { sockPath: daemon.hive.sockPath(), projectId: daemon.hive.projectId });
+    }
     return json(404, { error: 'not found' });
   } catch (e) {
     if (e instanceof BusyError) return json(409, { error: e.message });
     if (e instanceof NotFoundError) return json(404, { error: e.message });
+    if (e instanceof ClaimStaleError || e instanceof ClaimConflictError) {
+      return json(e.statusCode, { error: e.message });
+    }
     console.error(e);
     return json(500, { error: e instanceof Error ? e.message : 'internal' });
   }

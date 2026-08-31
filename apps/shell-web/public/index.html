@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fleet Web</title>
+  <style>
+    :root {
+      --bg0: #0e1412;
+      --bg1: #17211c;
+      --ink: #e7f0ea;
+      --muted: #8aa396;
+      --accent: #3dba7a;
+      --danger: #e26d5a;
+      --line: #2a3a32;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "IBM Plex Sans", "Source Sans 3", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #1d3a2c 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #243528 0%, transparent 50%),
+        linear-gradient(160deg, var(--bg0), var(--bg1));
+    }
+    main {
+      max-width: 420px;
+      margin: 0 auto;
+      padding: 18vh 1.25rem 3rem;
+    }
+    .brand {
+      font-family: "Fraunces", "Iowan Old Style", Georgia, serif;
+      font-size: clamp(2.4rem, 7vw, 3.2rem);
+      letter-spacing: -0.03em;
+      margin: 0 0 0.35rem;
+      animation: rise 700ms ease both;
+    }
+    p.lead {
+      margin: 0 0 1.75rem;
+      color: var(--muted);
+      animation: rise 700ms ease 80ms both;
+    }
+    form, .panel {
+      display: grid;
+      gap: 0.75rem;
+      animation: rise 700ms ease 140ms both;
+    }
+    label { font-size: 0.85rem; color: var(--muted); }
+    input {
+      width: 100%;
+      padding: 0.7rem 0.8rem;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.03);
+      color: var(--ink);
+      font: inherit;
+    }
+    button {
+      margin-top: 0.35rem;
+      border: 0;
+      border-radius: 10px;
+      padding: 0.75rem 1rem;
+      background: var(--accent);
+      color: #062214;
+      font-weight: 650;
+      cursor: pointer;
+      transition: transform 160ms ease, filter 160ms ease;
+    }
+    button:hover { transform: translateY(-1px); filter: brightness(1.05); }
+    .err { color: var(--danger); min-height: 1.2em; font-size: 0.9rem; }
+    .panel { display: none; }
+    .panel.visible { display: grid; }
+    code { color: var(--accent); }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Sans:wght@400;650&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <main>
+    <h1 class="brand">Fleet</h1>
+    <p class="lead">鉴权 Web shell · 同一 <code>fleet-gateway</code></p>
+    <form id="login">
+      <label>用户名<input name="username" autocomplete="username" required /></label>
+      <label>密码<input name="password" type="password" autocomplete="current-password" required /></label>
+      <button type="submit">登录</button>
+      <div class="err" id="err"></div>
+    </form>
+    <div class="panel" id="panel">
+      <p>已登录：<strong id="who"></strong></p>
+      <p>Gateway：<code id="gw"></code></p>
+      <button type="button" id="logout">退出</button>
+    </div>
+  </main>
+  <script>
+    const GATEWAY = '__GATEWAY__';
+    document.getElementById('gw').textContent = GATEWAY;
+    const err = document.getElementById('err');
+    const form = document.getElementById('login');
+    const panel = document.getElementById('panel');
+
+    async function refreshMe(token) {
+      const res = await fetch(GATEWAY + '/api/me', {
+        headers: token ? { authorization: 'Bearer ' + token } : {},
+        credentials: 'include'
+      });
+      if (!res.ok) return null;
+      return res.json();
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.textContent = '';
+      const fd = new FormData(form);
+      const res = await fetch(GATEWAY + '/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          username: fd.get('username'),
+          password: fd.get('password')
+        })
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        err.textContent = body.error || '登录失败';
+        return;
+      }
+      sessionStorage.setItem('fleet_token', body.token);
+      if (body.csrf) sessionStorage.setItem('fleet_csrf', body.csrf);
+      form.style.display = 'none';
+      panel.classList.add('visible');
+      document.getElementById('who').textContent = body.user.username;
+    });
+
+    document.getElementById('logout').addEventListener('click', async () => {
+      const token = sessionStorage.getItem('fleet_token');
+      await fetch(GATEWAY + '/logout', {
+        method: 'POST',
+        headers: token ? { authorization: 'Bearer ' + token } : {},
+        credentials: 'include'
+      });
+      sessionStorage.clear();
+      location.reload();
+    });
+
+    (async () => {
+      const token = sessionStorage.getItem('fleet_token');
+      if (!token) return;
+      const me = await refreshMe(token);
+      if (!me) return;
+      form.style.display = 'none';
+      panel.classList.add('visible');
+      document.getElementById('who').textContent = me.user.username;
+    })();
+  </script>
+</body>
+</html>

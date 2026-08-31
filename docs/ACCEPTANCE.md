@@ -32,3 +32,25 @@
 
 - [x] status 变更不清除 `assignee`
 - [x] 部分 patch 保留未提及字段（merge 语义）
+
+## Hook / PTY 抽出（对齐 Munder main）
+
+- [x] PreToolUse + ControlRegistry → `permissionDecision: deny`
+- [x] halt → `continue: false`
+- [x] steer → `additionalContext` 一次消费
+- [x] `require_decision` → PendingDecision 硬闸
+- [x] `buildPtyEnv` 剥离父会话 CLAUDE_* 身份
+- [x] HiveRoot 保证 `hive/tasks.json` + hooks.sock 路径
+
+## Claim（对齐 Multica freshness）
+
+- [x] 新鲜 runtime 可 claim；超 150s → stale
+- [x] 跨 runtime 重复 claim → conflict
+- [x] 同 runtime 幂等
+
+## Shell 接线
+
+- [x] Web：`apps/shell-web` → gateway `/login`（userSession）
+- [x] Electron：`ElectronFleetClient.assertLocalIdentity`（Local）
+
+上游对照表：[`docs/COMPARISON.md`](./COMPARISON.md)

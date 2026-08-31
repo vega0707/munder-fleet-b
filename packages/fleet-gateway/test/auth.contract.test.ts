@@ -4,7 +4,7 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { LOCAL_DEFAULT_USER } from '@munder/fleet-protocol';
-import { FleetGateway, SESSION_COOKIE } from '../src/gateway.js';
+import { FleetGateway, SESSION_COOKIE, CSRF_COOKIE, CSRF_HEADER } from '../src/gateway.js';
 import { SessionStore } from '../src/sessionStore.js';
 
 describe('Gateway userSession auth', () => {
@@ -70,6 +70,26 @@ describe('Gateway userSession auth', () => {
       headers: { authorization: `Bearer ${token}` }
     });
     assert.equal(me.status, 401);
+  });
+
+  it('cookie-only mutating request without CSRF → 403', async () => {
+    const login = await gw.handleForTest('POST', '/login', {
+      body: { username: 'erin', password: 'pw-erin-ok' }
+    });
+    const token = (login.body as { token: string }).token;
+    const csrf = (login.body as { csrf: string }).csrf;
+    assert.ok(csrf);
+    const denied = await gw.handleForTest('POST', '/api/auth/tokens', {
+      cookies: { [SESSION_COOKIE]: token, [CSRF_COOKIE]: csrf }
+      // missing x-csrf-token header
+    });
+    assert.equal(denied.status, 403);
+    const ok = await gw.handleForTest('POST', '/api/auth/tokens', {
+      cookies: { [SESSION_COOKIE]: token, [CSRF_COOKIE]: csrf },
+      headers: { [CSRF_HEADER]: csrf },
+      body: { label: 'web' }
+    });
+    assert.equal(ok.status, 200);
   });
 
   it('API token (PAT) authenticates', async () => {

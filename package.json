@@ -4,14 +4,16 @@
   "version": "0.1.0",
   "description": "Strategy B — Munder TS fleet (daemon + gateway)",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "scripts": {
-    "build": "npm run build -w @munder/fleet-protocol && npm run build -w @munder/fleet-daemon && npm run build -w @munder/fleet-gateway",
-    "test": "npm run build && npm run test -w @munder/fleet-protocol && npm run test -w @munder/fleet-daemon && npm run test -w @munder/fleet-gateway",
-    "typecheck": "npm run build -w @munder/fleet-protocol && npm run typecheck -w @munder/fleet-protocol && npm run typecheck -w @munder/fleet-daemon && npm run typecheck -w @munder/fleet-gateway",
+    "build": "npm run build -w @munder/fleet-protocol && npm run build -w @munder/fleet-daemon && npm run build -w @munder/fleet-gateway && npm run build -w @munder/shell-electron",
+    "test": "npm run build && npm run test -w @munder/fleet-protocol && npm run test -w @munder/fleet-daemon && npm run test -w @munder/fleet-gateway && npm run test -w @munder/shell-web && npm run test -w @munder/shell-electron",
+    "typecheck": "npm run build -w @munder/fleet-protocol && npm run typecheck -w @munder/fleet-protocol && npm run typecheck -w @munder/fleet-daemon && npm run typecheck -w @munder/fleet-gateway && npm run typecheck -w @munder/shell-electron",
     "daemon": "npm run start -w @munder/fleet-daemon",
-    "gateway": "npm run start -w @munder/fleet-gateway"
+    "gateway": "npm run start -w @munder/fleet-gateway",
+    "web": "npm run start -w @munder/shell-web"
   },
   "engines": {
     "node": ">=22"

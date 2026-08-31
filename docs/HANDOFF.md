@@ -14,11 +14,13 @@
 
 ## 立刻该做
 
-1. `./scripts/bootstrap.sh` — 获取 munder-difflin 基线与上游对照
-2. 设计 `packages/fleet-daemon`：从 `src/main/*` 抽 hive/pty/hooks/control
-3. 设计 `packages/fleet-gateway`：HTTP/WS + auth（SQLite sessions）
-4. 移植对象：`Runtime` / `PendingDecision` / claim API（对齐 `refs/multica` 文档与 `refs/AionCore` team 语义）
-5. Electron 连 daemon；Web 鉴权连同一 gateway
+1. [x] `./scripts/bootstrap.sh` — 获取 munder-difflin 基线与上游对照
+2. [x] `packages/fleet-daemon`：hive/pty/hooks/control 抽出（子集 + 契约；全量 HiveManager 见 COMPARISON）
+3. [x] `packages/fleet-gateway`：HTTP + auth（SQLite sessions）+ CSRF
+4. [x] `Runtime` / `PendingDecision` / claim API
+5. [x] Electron Local client + Web 鉴权 → 同一 gateway
+
+对照结论：[`docs/COMPARISON.md`](./COMPARISON.md)
 
 ## 不要做
 

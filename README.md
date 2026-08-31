@@ -9,7 +9,7 @@
 | 策略代号 | **B** |
 | 姊妹仓（含 [`munder-fleet-d`](../munder-fleet-d)） | [`munder-fleet-a`](../munder-fleet-a) · [`munder-fleet-c`](../munder-fleet-c) |
 | 主实现栈 | Electron · React · Node（延续 munder-difflin） |
-| 状态 | Scaffold / 交接就绪 |
+| 状态 | P0–P3 契约落地（见 ROADMAP / COMPARISON） |
 
 ## 与 A/C 的差别
 
@@ -22,7 +22,7 @@
 ## 你要做什么
 
 1. [`docs/HANDOFF.md`](./docs/HANDOFF.md)
-2. [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) · [`docs/COPY_MAP.md`](./docs/COPY_MAP.md)
+2. [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) · [`docs/COPY_MAP.md`](./docs/COPY_MAP.md) · [`docs/COMPARISON.md`](./docs/COMPARISON.md)
 3. [`scripts/bootstrap.sh`](./scripts/bootstrap.sh) — 子模块或 clone munder-difflin 为工作树基线
 4. 按 [`docs/ROADMAP.md`](./docs/ROADMAP.md) 把 Gateway / DecisionGate / Fleet claim 做进 TS daemon
 

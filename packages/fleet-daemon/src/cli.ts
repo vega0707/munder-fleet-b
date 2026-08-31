@@ -8,26 +8,28 @@
 import { createServer } from 'node:http';
 import { FleetDaemon } from './daemon.js';
 import { BusyError, NotFoundError } from './decisionGate.js';
+import { ClaimConflictError, ClaimStaleError } from './claimService.js';
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
-const hiveDir = arg('--hive');
+const hiveHome = arg('--hive');
 const listen = arg('--listen') ?? '127.0.0.1:3920';
 const [host, portStr] = listen.split(':');
 const port = Number(portStr ?? 3920);
 
 const daemon = new FleetDaemon({
-  hiveDir,
+  hiveHome,
   launchedBy: 'cli',
+  preferNodePty: true,
   providers: [
     { name: 'claude', provider: 'claude' },
     { name: 'codex', provider: 'codex' }
   ]
 });
-const { info, runtimes } = daemon.start();
+const { info, runtimes } = await daemon.startAsync();
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${host}:${port}`);
@@ -78,10 +80,58 @@ const server = createServer(async (req, res) => {
       const conversationId = decodeURIComponent(url.pathname.split('/')[2]!);
       return json(200, daemon.decisions.summary(conversationId));
     }
+    if (req.method === 'POST' && url.pathname === '/claims') {
+      const body = JSON.parse(await readBody(req)) as { taskId?: string; runtimeId?: string };
+      return json(200, {
+        claim: daemon.claimTask(body.taskId ?? '', body.runtimeId ?? '')
+      });
+    }
+    if (req.method === 'GET' && url.pathname === '/claims') {
+      return json(200, { claims: daemon.claims.list() });
+    }
+    if (req.method === 'GET' && url.pathname === '/hooks/sock') {
+      return json(200, { sockPath: daemon.hive.sockPath(), projectId: daemon.hive.projectId });
+    }
+    if (req.method === 'GET' && url.pathname === '/team') {
+      return json(200, { agents: daemon.team.listAgents(), mailbox: daemon.team.listMailbox() });
+    }
+    if (req.method === 'POST' && url.pathname === '/team/register') {
+      const body = JSON.parse(await readBody(req));
+      daemon.team.upsertAgent(body);
+      return json(200, { agents: daemon.team.listAgents() });
+    }
+    if (req.method === 'POST' && url.pathname === '/team/complete') {
+      const body = JSON.parse(await readBody(req)) as { slotId?: string; summary?: string };
+      return json(200, daemon.completeToMichael(body.slotId ?? '', body.summary));
+    }
+    if (req.method === 'GET' && url.pathname === '/blockers') {
+      return json(200, { blockers: daemon.blockers.listOpen() });
+    }
+    if (req.method === 'POST' && url.pathname === '/blockers') {
+      const body = JSON.parse(await readBody(req));
+      return json(200, { blocker: daemon.blockers.raise(body) });
+    }
+    if (req.method === 'POST' && url.pathname.match(/^\/blockers\/[^/]+\/resolve$/)) {
+      const id = decodeURIComponent(url.pathname.split('/')[2]!);
+      const body = JSON.parse(await readBody(req)) as { byUserId?: string };
+      return json(200, { blocker: daemon.blockers.resolve(id, body.byUserId ?? '') });
+    }
+    if (req.method === 'POST' && url.pathname === '/claims/auto') {
+      return json(200, daemon.autoClaim.tick());
+    }
+    if (req.method === 'GET' && url.pathname === '/metrics') {
+      return json(200, daemon.metrics.snapshot());
+    }
+    if (req.method === 'POST' && url.pathname === '/mail/route') {
+      return json(200, { delivered: daemon.mail.routeOnce() });
+    }
     return json(404, { error: 'not found' });
   } catch (e) {
     if (e instanceof BusyError) return json(409, { error: e.message });
     if (e instanceof NotFoundError) return json(404, { error: e.message });
+    if (e instanceof ClaimStaleError || e instanceof ClaimConflictError) {
+      return json(e.statusCode, { error: e.message });
+    }
     console.error(e);
     return json(500, { error: e instanceof Error ? e.message : 'internal' });
   }

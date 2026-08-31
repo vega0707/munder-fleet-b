@@ -1,6 +1,7 @@
 /**
  * FleetGateway — Aion-aligned Local vs userSession identity.
  * Local mode (Electron): fixed system user, no JWT/CSRF.
+ * userSession: password/token + double-submit CSRF on mutating routes.
  * NOT "any 127.0.0.1 is anonymous".
  */
 import {
@@ -9,6 +10,7 @@ import {
   type Server,
   type ServerResponse
 } from 'node:http';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   LOCAL_DEFAULT_USER,
   type AuthIdentityMode,
@@ -19,13 +21,17 @@ import {
 import { SessionStore } from './sessionStore.js';
 
 export const SESSION_COOKIE = 'fleet-session';
+export const CSRF_COOKIE = 'fleet-csrf-token';
+export const CSRF_HEADER = 'x-csrf-token';
+
+const CSRF_EXEMPT = new Set(['/login', '/logout', '/api/auth/status', '/health', '/api/auth/refresh']);
+export const REFRESH_COOKIE = 'fleet-refresh';
 
 export interface GatewayOpts {
   identityMode: AuthIdentityMode;
   store?: SessionStore;
   port?: number;
   host?: string;
-  /** Upstream fleet-daemon base URL for proxying (optional). */
   daemonUrl?: string;
 }
 
@@ -64,7 +70,10 @@ export class FleetGateway {
     };
   }
 
-  login(username: string, password: string): LoginResponse | { error: string; status: number } {
+  login(
+    username: string,
+    password: string
+  ): (LoginResponse & { refreshToken: string }) | { error: string; status: number } {
     if (username.length > 32 || password.length > 128) {
       return { error: 'invalid credentials length', status: 400 };
     }
@@ -73,8 +82,22 @@ export class FleetGateway {
     }
     const user = this.store.verifyPassword(username, password);
     if (!user) return { error: 'Invalid username or password', status: 401 };
-    const token = this.store.createSession(user);
-    return { success: true, user, token };
+    const { accessToken, refreshToken } = this.store.createSessionPair(user);
+    return { success: true, user, token: accessToken, refreshToken };
+  }
+
+  /** CSRF check — Local mode always passes; GET/HEAD/OPTIONS pass; exempt paths pass. */
+  csrfOk(req: IncomingMessage, path: string): boolean {
+    if (this.identityMode === 'local') return true;
+    const method = (req.method ?? 'GET').toUpperCase();
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return true;
+    if (CSRF_EXEMPT.has(path)) return true;
+    // Bearer / PAT API clients skip cookie CSRF (native clients)
+    const auth = req.headers.authorization;
+    if (typeof auth === 'string' && auth.toLowerCase().startsWith('bearer ')) return true;
+    const cookieToken = parseCookie(req.headers.cookie)[CSRF_COOKIE] ?? '';
+    const headerToken = String(req.headers[CSRF_HEADER] ?? '');
+    return csrfTokensEqual(cookieToken, headerToken);
   }
 
   async listen(): Promise<{ host: string; port: number }> {
@@ -96,7 +119,6 @@ export class FleetGateway {
     this.server = undefined;
   }
 
-  /** Test helper — handle one request without listening. */
   async handleForTest(
     method: string,
     path: string,
@@ -128,7 +150,18 @@ export class FleetGateway {
           return res;
         },
         setHeader(k: string, v: string | string[]) {
-          outHeaders[k.toLowerCase()] = v;
+          const key = k.toLowerCase();
+          if (key === 'set-cookie') {
+            const prev = outHeaders[key];
+            const next = Array.isArray(v) ? v : [v];
+            outHeaders[key] = prev
+              ? [...(Array.isArray(prev) ? prev : [prev]), ...next]
+              : next.length === 1
+                ? next[0]
+                : next;
+            return;
+          }
+          outHeaders[key] = v;
         },
         end(payload?: string | Buffer) {
           if (payload) chunks.push(Buffer.isBuffer(payload) ? payload : Buffer.from(payload));
@@ -163,6 +196,10 @@ export class FleetGateway {
     const path = url.pathname;
 
     try {
+      if (!this.csrfOk(req, path)) {
+        return sendJson(res, 403, { error: 'CSRF_INVALID' });
+      }
+
       if (req.method === 'GET' && path === '/health') {
         return sendJson(res, 200, { ok: true, identityMode: this.identityMode });
       }
@@ -183,14 +220,37 @@ export class FleetGateway {
         const body = JSON.parse(await readBody(req)) as { username?: string; password?: string };
         const result = this.login(body.username ?? '', body.password ?? '');
         if ('error' in result) return sendJson(res, result.status, { error: result.error });
-        setSessionCookie(res, result.token);
-        return sendJson(res, 200, result);
+        const csrf = randomBytes(24).toString('base64url');
+        setAuthCookies(res, result.token, csrf, result.refreshToken);
+        return sendJson(res, 200, { ...result, csrf });
+      }
+
+      if (req.method === 'POST' && path === '/api/auth/refresh') {
+        if (this.identityMode === 'local') {
+          return sendJson(res, 200, {
+            success: true,
+            user: LOCAL_DEFAULT_USER,
+            token: 'local-mode-no-token'
+          });
+        }
+        const body = JSON.parse(await readBody(req)) as { refreshToken?: string };
+        const cookies = parseCookie(req.headers.cookie);
+        const refreshToken = body.refreshToken || cookies[REFRESH_COOKIE] || '';
+        const rotated = this.store.refreshAccess(refreshToken);
+        if (!rotated) return sendJson(res, 401, { error: 'invalid refresh token' });
+        const csrf = randomBytes(24).toString('base64url');
+        setAuthCookies(res, rotated.accessToken, csrf, refreshToken);
+        return sendJson(res, 200, {
+          success: true,
+          user: rotated.user,
+          token: rotated.accessToken
+        });
       }
 
       if (req.method === 'POST' && path === '/logout') {
         const token = extractToken(req);
         if (token) this.store.revokeToken(token);
-        clearSessionCookie(res);
+        clearAuthCookies(res);
         return sendJson(res, 200, { success: true });
       }
 
@@ -208,7 +268,6 @@ export class FleetGateway {
         return sendJson(res, 200, { user });
       }
 
-      // Proxy select daemon routes when configured
       if (this.daemonUrl && path.startsWith('/api/daemon/')) {
         const user = this.requireUser(req, res);
         if (!user) return;
@@ -246,25 +305,57 @@ export function extractToken(req: IncomingMessage): string {
   if (typeof auth === 'string' && auth.toLowerCase().startsWith('bearer ')) {
     return auth.slice(7).trim();
   }
-  const cookieHeader = req.headers.cookie;
-  if (typeof cookieHeader === 'string') {
-    for (const part of cookieHeader.split(';')) {
-      const [k, ...rest] = part.trim().split('=');
-      if (k === SESSION_COOKIE) return decodeURIComponent(rest.join('='));
-    }
+  const cookies = parseCookie(req.headers.cookie);
+  return cookies[SESSION_COOKIE] ?? '';
+}
+
+function parseCookie(header: string | string[] | undefined): Record<string, string> {
+  const raw = Array.isArray(header) ? header.join(';') : (header ?? '');
+  const out: Record<string, string> = {};
+  for (const part of raw.split(';')) {
+    const [k, ...rest] = part.trim().split('=');
+    if (!k) continue;
+    out[k] = decodeURIComponent(rest.join('='));
   }
-  return '';
+  return out;
 }
 
-function setSessionCookie(res: ServerResponse, token: string): void {
-  res.setHeader(
-    'set-cookie',
-    `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}`
-  );
+function csrfTokensEqual(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const ba = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ba.length !== bb.length) return false;
+  try {
+    return timingSafeEqual(ba, bb);
+  } catch {
+    return false;
+  }
 }
 
-function clearSessionCookie(res: ServerResponse): void {
-  res.setHeader('set-cookie', `${SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0`);
+function setAuthCookies(
+  res: ServerResponse,
+  token: string,
+  csrf: string,
+  refreshToken?: string
+): void {
+  const cookies = [
+    `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}`,
+    `${CSRF_COOKIE}=${encodeURIComponent(csrf)}; Path=/; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}`
+  ];
+  if (refreshToken) {
+    cookies.push(
+      `${REFRESH_COOKIE}=${encodeURIComponent(refreshToken)}; HttpOnly; Path=/api/auth/refresh; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}`
+    );
+  }
+  res.setHeader('set-cookie', cookies);
+}
+
+function clearAuthCookies(res: ServerResponse): void {
+  res.setHeader('set-cookie', [
+    `${SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0`,
+    `${CSRF_COOKIE}=; Path=/; Max-Age=0`,
+    `${REFRESH_COOKIE}=; HttpOnly; Path=/api/auth/refresh; Max-Age=0`
+  ]);
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {

@@ -45,6 +45,14 @@ export class SessionStore {
         created_at INTEGER NOT NULL,
         revoked INTEGER NOT NULL DEFAULT 0
       );
+      CREATE TABLE IF NOT EXISTS refresh_tokens (
+        token_hash TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        session_generation INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        revoked INTEGER NOT NULL DEFAULT 0
+      );
     `);
   }
 
@@ -78,6 +86,58 @@ export class SessionStore {
     return { id: row.id, username: row.username };
   }
 
+  /** Password login → access + refresh tokens. */
+  createSessionPair(
+    user: FleetUser,
+    accessTtlMs = 30 * 24 * 60 * 60 * 1000,
+    refreshTtlMs = 30 * 24 * 60 * 60 * 1000
+  ): { accessToken: string; refreshToken: string } {
+    const accessToken = this.createSession(user, accessTtlMs);
+    const refreshToken = this.createRefreshToken(user, refreshTtlMs);
+    return { accessToken, refreshToken };
+  }
+
+  createRefreshToken(user: FleetUser, ttlMs = 30 * 24 * 60 * 60 * 1000): string {
+    const gen = this.sessionGeneration(user.id);
+    const token = `flr_${randomBytes(32).toString('base64url')}`;
+    const now = Date.now();
+    this.db
+      .prepare(
+        `INSERT INTO refresh_tokens (token_hash, user_id, session_generation, created_at, expires_at, revoked)
+         VALUES (?, ?, ?, ?, ?, 0)`
+      )
+      .run(hashToken(token), user.id, gen, now, now + ttlMs);
+    return token;
+  }
+
+  /**
+   * Exchange refresh → new access. Refresh tokens never authenticate ordinary APIs.
+   */
+  refreshAccess(refreshToken: string): { user: FleetUser; accessToken: string } | null {
+    if (!refreshToken.startsWith('flr_')) return null;
+    const th = hashToken(refreshToken);
+    const row = this.db
+      .prepare(
+        `SELECT r.user_id, r.session_generation, r.expires_at, r.revoked, u.username, u.session_generation AS user_gen
+         FROM refresh_tokens r JOIN users u ON u.id = r.user_id
+         WHERE r.token_hash = ?`
+      )
+      .get(th) as
+      | {
+          user_id: string;
+          session_generation: number;
+          expires_at: number;
+          revoked: number;
+          username: string;
+          user_gen: number;
+        }
+      | undefined;
+    if (!row || row.revoked || row.expires_at < Date.now()) return null;
+    if (row.session_generation !== row.user_gen) return null;
+    const user = { id: row.user_id, username: row.username };
+    return { user, accessToken: this.createSession(user) };
+  }
+
   /** Password login → opaque access token (30d). */
   createSession(user: FleetUser, ttlMs = 30 * 24 * 60 * 60 * 1000): string {
     const gen = this.sessionGeneration(user.id);
@@ -105,6 +165,8 @@ export class SessionStore {
 
   resolveToken(token: string): FleetUser | null {
     if (!token) return null;
+    // Refresh tokens must NEVER authenticate ordinary APIs (Aion access-only).
+    if (token.startsWith('flr_')) return null;
     const th = hashToken(token);
     if (token.startsWith('pat_')) {
       const row = this.db
@@ -141,6 +203,7 @@ export class SessionStore {
     const th = hashToken(token);
     this.db.prepare('UPDATE sessions SET revoked = 1 WHERE token_hash = ?').run(th);
     this.db.prepare('UPDATE api_tokens SET revoked = 1 WHERE token_hash = ?').run(th);
+    this.db.prepare('UPDATE refresh_tokens SET revoked = 1 WHERE token_hash = ?').run(th);
   }
 
   bumpSessionGeneration(userId: string): void {

@@ -23,6 +23,9 @@ export interface LoginResponse {
   user: FleetUser;
   /** Access token (also set as HttpOnly session cookie for browsers). */
   token: string;
+  /** Refresh token — path-scoped; cannot call ordinary APIs. */
+  refreshToken?: string;
+  csrf?: string;
 }
 
 export interface AuthStatus {

@@ -4,7 +4,7 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { LOCAL_DEFAULT_USER } from '@munder/fleet-protocol';
-import { FleetGateway, SESSION_COOKIE } from '../src/gateway.js';
+import { FleetGateway, SESSION_COOKIE, CSRF_COOKIE, CSRF_HEADER } from '../src/gateway.js';
 import { SessionStore } from '../src/sessionStore.js';
 
 describe('Gateway userSession auth', () => {
@@ -72,6 +72,26 @@ describe('Gateway userSession auth', () => {
     assert.equal(me.status, 401);
   });
 
+  it('cookie-only mutating request without CSRF → 403', async () => {
+    const login = await gw.handleForTest('POST', '/login', {
+      body: { username: 'erin', password: 'pw-erin-ok' }
+    });
+    const token = (login.body as { token: string }).token;
+    const csrf = (login.body as { csrf: string }).csrf;
+    assert.ok(csrf);
+    const denied = await gw.handleForTest('POST', '/api/auth/tokens', {
+      cookies: { [SESSION_COOKIE]: token, [CSRF_COOKIE]: csrf }
+      // missing x-csrf-token header
+    });
+    assert.equal(denied.status, 403);
+    const ok = await gw.handleForTest('POST', '/api/auth/tokens', {
+      cookies: { [SESSION_COOKIE]: token, [CSRF_COOKIE]: csrf },
+      headers: { [CSRF_HEADER]: csrf },
+      body: { label: 'web' }
+    });
+    assert.equal(ok.status, 200);
+  });
+
   it('API token (PAT) authenticates', async () => {
     const login = await gw.handleForTest('POST', '/login', {
       body: { username: 'dave', password: 'pw-dave' }
@@ -85,6 +105,28 @@ describe('Gateway userSession auth', () => {
     assert.ok(pat.startsWith('pat_'));
     const me = await gw.handleForTest('GET', '/api/me', {
       headers: { authorization: `Bearer ${pat}` }
+    });
+    assert.equal(me.status, 200);
+  });
+
+  it('refresh token cannot call ordinary APIs; refresh endpoint issues access', async () => {
+    const login = await gw.handleForTest('POST', '/login', {
+      body: { username: 'frank', password: 'pw-frank-ok' }
+    });
+    const refreshToken = (login.body as { refreshToken: string }).refreshToken;
+    assert.ok(refreshToken?.startsWith('flr_'));
+    const denied = await gw.handleForTest('GET', '/api/me', {
+      headers: { authorization: `Bearer ${refreshToken}` }
+    });
+    assert.equal(denied.status, 401);
+    const refreshed = await gw.handleForTest('POST', '/api/auth/refresh', {
+      body: { refreshToken }
+    });
+    assert.equal(refreshed.status, 200);
+    const access = (refreshed.body as { token: string }).token;
+    assert.ok(access.startsWith('flt_'));
+    const me = await gw.handleForTest('GET', '/api/me', {
+      headers: { authorization: `Bearer ${access}` }
     });
     assert.equal(me.status, 200);
   });

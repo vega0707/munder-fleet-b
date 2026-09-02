@@ -22,6 +22,8 @@
 
 对照结论：[`docs/COMPARISON.md`](./COMPARISON.md)
 
+WorkBuddy 对标调研与为何 B 为主路径：[`docs/WORKBUDDY_ANALYSIS.md`](./WORKBUDDY_ANALYSIS.md) → 后续里程碑见 ROADMAP § P4。
+
 ## 不要做
 
 - 不要引入第二模式开关

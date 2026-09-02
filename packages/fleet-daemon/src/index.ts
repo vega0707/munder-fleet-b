@@ -37,3 +37,5 @@ export { PlanRegistry } from './planRegistry.js';
 export { QuotaLedger } from './quotaLedger.js';
 export { QuotaScheduler } from './quotaScheduler.js';
 export { parseRateLimitSignal } from './rateLimitParser.js';
+export { PlanLimitTuner } from './planLimitTuner.js';
+export { RateLimitWatcher } from './rateLimitWatcher.js';

@@ -37,3 +37,4 @@
 - 每个 coding plan 独立配置在 `hive/plans.json`；**无 fleet 级默认额度规则**。
 - `limits` 全可选：不配 proactive 规则时，仅依赖 CLI 被动 rate-limit（`POST /quota/rate-limit`）。
 - `QuotaScheduler` 冷却到期后自动 `AutoClaim` 积压任务；多 plan 时按剩余 headroom 选 runtime。
+- PTY / Hook 输出自动 `parseRateLimitSignal`；`autoTune.enabled` 的 plan 从观测动态改写 `limits`（写入 `plan-tune-observations.json`）。

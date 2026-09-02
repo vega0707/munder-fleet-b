@@ -24,7 +24,7 @@ const PATTERNS: Array<{ re: RegExp; ms: (m: RegExpMatchArray) => number }> = [
     ms: (m) => Number(m[1]) * 1_000
   },
   {
-    re: /rate limit|quota exceeded|usage limit|too many requests|429/i,
+    re: /rate limit|quota exceeded|usage limit|too many requests|429|额度|用量已达|限速|请稍后/i,
     ms: () => 0
   }
 ];

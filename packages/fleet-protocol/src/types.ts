@@ -71,6 +71,20 @@ export interface PlanBudgetConfig {
   name?: string;
   provider: string;
   limits?: PlanLimits;
+  /** Learn limits from observed CLI rate-limits (per-plan opt-in). */
+  autoTune?: {
+    enabled?: boolean;
+    /** EMA blend for cooldown ms (0–1, default 0.35). */
+    learningRate?: number;
+  };
+}
+
+export interface PlanTuneObservation {
+  planId: string;
+  tasksBeforeLimit: number;
+  cooldownMs: number;
+  observedAt: string;
+  signalDetail: string;
 }
 
 export type QuotaCooldownReason = 'window_exhausted' | 'consecutive_exhausted' | 'rate_limit';

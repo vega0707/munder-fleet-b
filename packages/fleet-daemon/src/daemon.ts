@@ -27,6 +27,8 @@ import { TeamWakeScheduler } from './teamWake.js';
 import { PlanRegistry } from './planRegistry.js';
 import { QuotaLedger } from './quotaLedger.js';
 import { QuotaScheduler } from './quotaScheduler.js';
+import { PlanLimitTuner } from './planLimitTuner.js';
+import { RateLimitWatcher } from './rateLimitWatcher.js';
 import type {
   ArtifactRef,
   ExpertProfile,
@@ -77,6 +79,8 @@ export class FleetDaemon {
   readonly memory: MemoryStore;
   readonly plans: PlanRegistry;
   readonly quota: QuotaLedger;
+  readonly planTuner: PlanLimitTuner;
+  readonly rateLimitWatcher: RateLimitWatcher;
   private quotaScheduler: QuotaScheduler | undefined;
   hooks: HookServer | undefined;
   private info: DaemonInfo | undefined;
@@ -91,10 +95,30 @@ export class FleetDaemon {
     });
     const taskDir = opts.hiveDir ?? (opts.hiveHome ? this.hive.hiveDir() : undefined);
     const hiveDir = taskDir ?? this.hive.hiveDir();
-    this.pty = new PtyManager({ backend: opts.ptyBackend });
     this.tasks = new HiveTaskStore(taskDir);
     this.plans = new PlanRegistry(hiveDir);
     this.quota = new QuotaLedger(hiveDir, this.plans, this.runtimes);
+    this.planTuner = new PlanLimitTuner(hiveDir, this.plans);
+    this.rateLimitWatcher = new RateLimitWatcher({
+      quota: this.quota,
+      tuner: this.planTuner,
+      onDetected: (runtimeId, snap, appliedMs) => {
+        this.metrics.event('quota.rate_limit_auto', {
+          runtimeId,
+          planId: snap.planId,
+          cooldownMs: appliedMs
+        });
+      }
+    });
+    this.pty = new PtyManager({
+      backend: opts.ptyBackend,
+      emit: (event, ptyId, payload) => {
+        if (event !== 'data') return;
+        const p = payload as { chunk?: string; runtimeId?: string };
+        const runtimeId = p.runtimeId ?? this.pty.runtimeIdFor(ptyId) ?? this.resolveRuntimeForAgent();
+        if (runtimeId && p.chunk) this.rateLimitWatcher.ingest(runtimeId, p.chunk);
+      }
+    });
     this.claims = new ClaimService(this.runtimes, this.quota);
     this.mail = new HiveMailRouter(this.hive);
     this.autoClaim = new AutoClaimLoop({
@@ -139,7 +163,12 @@ export class FleetDaemon {
         projectId: this.hive.projectId,
         conversationId: this.hive.projectId,
         control: this.control,
-        decisions: this.decisions
+        decisions: this.decisions,
+        onEvent: (agentId, _event, message) => {
+          if (!message) return;
+          const runtimeId = this.resolveRuntimeForAgent(agentId);
+          if (runtimeId) this.rateLimitWatcher.ingest(runtimeId, message);
+        }
       });
       this.hooks.start();
     }
@@ -206,9 +235,21 @@ export class FleetDaemon {
     return { leadToWake };
   }
 
-  spawnPty(opts: SpawnOpts) {
+  spawnPty(opts: SpawnOpts & { runtimeId?: string }) {
     this.ensureStarted();
     return this.pty.spawn(opts);
+  }
+
+  /** Map team agent / assignee to active claim runtime, else first claimable runtime. */
+  resolveRuntimeForAgent(agentId?: string): string | undefined {
+    if (agentId) {
+      for (const claim of this.claims.list()) {
+        const task = this.tasks.list().find((t) => t.id === claim.taskId);
+        if (task?.assignee === agentId) return claim.runtimeId;
+      }
+    }
+    const available = this.claims.claimableRuntimes();
+    return available[0]?.id;
   }
 
   claimTask(taskId: string, runtimeId: string): ClaimRecord {
@@ -366,9 +407,13 @@ export class FleetDaemon {
 
   reportRateLimit(runtimeId: string, signal: string): RuntimeQuotaSnapshot | null {
     this.ensureStarted();
-    const snap = this.quota.applyRateLimitSignal(runtimeId, signal);
-    if (snap) this.metrics.event('quota.rate_limit', { runtimeId, planId: snap.planId });
-    return snap;
+    const snap = this.rateLimitWatcher.ingest(runtimeId, signal);
+    if (snap) return snap;
+    return this.quota.applyRateLimitSignal(runtimeId, signal);
+  }
+
+  listTuneObservations(planId?: string) {
+    return this.planTuner.list(planId);
   }
 
   /** Manual quota scheduler tick (also runs on interval). */

@@ -20,6 +20,8 @@ export interface SpawnOpts {
   env?: Record<string, string>;
   cols?: number;
   rows?: number;
+  /** Fleet runtime bound to this PTY session (for quota / rate-limit detection). */
+  runtimeId?: string;
 }
 
 export type PtyEmit = (event: 'data' | 'exit', ptyId: string, payload: unknown) => void;
@@ -32,10 +34,18 @@ export interface PtyBackend {
     write(data: string): void;
     resize(cols: number, rows: number): void;
     kill(): void;
+    onData?(callback: (data: string) => void): void;
   };
 }
 
 export class FakePtyBackend implements PtyBackend {
+  private readonly dataHandlers = new Map<string, (data: string) => void>();
+
+  /** Test helper — push output as if CLI wrote to PTY. */
+  emitData(ptyId: string, data: string): void {
+    this.dataHandlers.get(ptyId)?.(data);
+  }
+
   spawn(opts: SpawnOpts) {
     const id = randomUUID();
     return {
@@ -43,7 +53,10 @@ export class FakePtyBackend implements PtyBackend {
       pid: process.pid,
       write(_data: string) {},
       resize(_cols: number, _rows: number) {},
-      kill() {}
+      kill() {},
+      onData: (callback: (data: string) => void) => {
+        this.dataHandlers.set(id, callback);
+      }
     };
   }
 }
@@ -51,7 +64,13 @@ export class FakePtyBackend implements PtyBackend {
 export class PtyManager {
   private readonly sessions = new Map<
     string,
-    { info: PtyInfo; write: (d: string) => void; resize: (c: number, r: number) => void; kill: () => void }
+    {
+      info: PtyInfo;
+      runtimeId?: string;
+      write: (d: string) => void;
+      resize: (c: number, r: number) => void;
+      kill: () => void;
+    }
   >();
   private backend: PtyBackend;
   private emit: PtyEmit;
@@ -59,6 +78,10 @@ export class PtyManager {
   constructor(opts: { backend?: PtyBackend; emit?: PtyEmit } = {}) {
     this.backend = opts.backend ?? new FakePtyBackend();
     this.emit = opts.emit ?? (() => {});
+  }
+
+  setEmit(emit: PtyEmit): void {
+    this.emit = emit;
   }
 
   setBackend(backend: PtyBackend): void {
@@ -75,8 +98,14 @@ export class PtyManager {
       command: opts.command,
       alive: true
     };
+    if (handle.onData) {
+      handle.onData((chunk) => {
+        this.emit('data', id, { chunk, runtimeId: opts.runtimeId });
+      });
+    }
     this.sessions.set(id, {
       info,
+      runtimeId: opts.runtimeId,
       write: (d) => handle.write(d),
       resize: (c, r) => handle.resize(c, r),
       kill: () => handle.kill()
@@ -113,5 +142,9 @@ export class PtyManager {
 
   getActivePtyCount(): number {
     return [...this.sessions.values()].filter((s) => s.info.alive).length;
+  }
+
+  runtimeIdFor(ptyId: string): string | undefined {
+    return this.sessions.get(ptyId)?.runtimeId;
   }
 }

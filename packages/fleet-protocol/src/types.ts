@@ -84,6 +84,73 @@ export interface RuntimeSummary {
 
 export type TaskStatus = 'todo' | 'doing' | 'blocked' | 'done';
 
+/** WorkBuddy-style expert — extends Role with methodology + defaults. */
+export interface ExpertProfile {
+  id: string;
+  name: string;
+  /** 角色定位 */
+  positioning: string;
+  /** 方法论 / system prompt 摘要 */
+  methodology: string;
+  defaultSkills: string[];
+  defaultConnectors: string[];
+  /** Optional team slot binding */
+  slotId?: string;
+}
+
+export interface SkillRef {
+  id: string;
+  name: string;
+}
+
+/** Loaded skill package — SKILL.md + scripts + tool whitelist. */
+export interface SkillPackage extends SkillRef {
+  description: string;
+  /** SKILL.md body (after frontmatter) */
+  content: string;
+  scripts: string[];
+  toolWhitelist: string[];
+  dir: string;
+}
+
+export type ConnectorKind = 'mcp' | 'email' | 'im' | 'docs' | 'other';
+
+export interface ConnectorRef {
+  id: string;
+  name: string;
+  kind: ConnectorKind;
+  enabled: boolean;
+  config?: Record<string, string>;
+}
+
+/** Project-level defaults injected into new tasks. */
+export interface ProjectConfig {
+  projectId: string;
+  globalInstructions: string;
+  defaultExperts: string[];
+  defaultSkills: string[];
+  defaultConnectors: string[];
+  updatedAt: string;
+}
+
+export interface ArtifactRef {
+  id: string;
+  taskId: string;
+  filename: string;
+  version: number;
+  mimeType?: string;
+  createdAt: string;
+  sizeBytes: number;
+}
+
+/** Per-user preference — separate from project team standards. */
+export interface MemoryEntry {
+  userId: string;
+  key: string;
+  value: string;
+  updatedAt: string;
+}
+
 /** Munder hive task — assignee must survive status patches. */
 export interface HiveTask {
   id: string;
@@ -95,6 +162,14 @@ export interface HiveTask {
   priority: number;
   createdAt: string;
   result?: string;
+  /** P4 — expert / skill / connector context */
+  expertId?: string;
+  skillIds?: string[];
+  connectorIds?: string[];
+  parentTaskId?: string;
+  /** Project global instructions + memory prefs merged at create time */
+  injectedInstructions?: string;
+  artifactIds?: string[];
 }
 
 export interface DaemonInfo {

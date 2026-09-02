@@ -26,3 +26,10 @@ export type { TeamAgent, WakePayload, MailboxMessage, AgentStatus } from './team
 export { FleetMetrics } from './metrics.js';
 export { FleetDaemon } from './daemon.js';
 export type { FleetDaemonOpts } from './daemon.js';
+export { ExpertRegistry } from './expertRegistry.js';
+export { SkillLoader, parseSkillMarkdown } from './skillLoader.js';
+export { ProjectConfigStore, injectProjectContext } from './projectConfigStore.js';
+export { Orchestrator } from './orchestrator.js';
+export type { SubtaskSpec } from './orchestrator.js';
+export { ArtifactStore } from './artifactStore.js';
+export { MemoryStore } from './memoryStore.js';

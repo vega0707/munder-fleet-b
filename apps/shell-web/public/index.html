@@ -51,7 +51,8 @@
     .app.visible { display: block; }
     .bar { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: 1.5rem; }
     .grid { display: grid; gap: 1.5rem; grid-template-columns: 1.2fr 1fr; }
-    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+    .grid-p4 { display: grid; gap: 1.5rem; grid-template-columns: 1fr 1fr; margin-top: 1.5rem; }
+    @media (max-width: 760px) { .grid, .grid-p4 { grid-template-columns: 1fr; } }
     section h2 { font-size: 1rem; margin: 0 0 0.75rem; color: var(--muted); font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
     .list { display: grid; gap: 0.55rem; }
     .row {
@@ -62,7 +63,7 @@
     .meta { color: var(--muted); font-size: 0.85rem; }
     .tag { font-size: 0.75rem; color: var(--warn); }
     .role-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.5rem; margin-top: 0.75rem; }
-    @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+    textarea { min-height: 4.5rem; resize: vertical; font: inherit; }
   </style>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -105,6 +106,21 @@
           </form>
         </section>
       </div>
+      <div class="grid-p4">
+        <section>
+          <h2>Project 配置</h2>
+          <form id="projectForm" class="login" style="max-width:none">
+            <label>全局指令<textarea name="globalInstructions" id="globalInstructions"></textarea></label>
+            <label>默认 Skill（逗号分隔）<input name="defaultSkills" id="defaultSkills" placeholder="competitor, slides" /></label>
+            <button type="submit">保存 Project</button>
+          </form>
+        </section>
+        <section>
+          <h2>Expert · Skill</h2>
+          <div class="list" id="experts"></div>
+          <div class="list" id="skills" style="margin-top:0.75rem"></div>
+        </section>
+      </div>
     </div>
   </main>
   <script>
@@ -144,9 +160,11 @@
       try {
         const tasks = await api(DAEMON, '/tasks');
         const el = document.getElementById('tasks');
-        el.innerHTML = (tasks.tasks || []).map(t =>
-          `<div class="row"><div><strong>${escapeHtml(t.title)}</strong><div class="meta">${escapeHtml(t.id)} · ${escapeHtml(t.status)}</div></div><div class="tag">${escapeHtml(t.assignee || 'unassigned')}</div></div>`
-        ).join('') || '<div class="meta">暂无任务</div>';
+        el.innerHTML = (tasks.tasks || []).map(t => {
+          const arts = (t.artifactIds || []).length ? ` · 产物 ${t.artifactIds.length}` : '';
+          const skills = (t.skillIds || []).join(', ');
+          return `<div class="row"><div><strong>${escapeHtml(t.title)}</strong><div class="meta">${escapeHtml(t.id)} · ${escapeHtml(t.status)}${arts}${skills ? ' · skill:' + escapeHtml(skills) : ''}</div></div><div class="tag">${escapeHtml(t.assignee || 'unassigned')}</div></div>`;
+        }).join('') || '<div class="meta">暂无任务</div>';
       } catch (e) {
         document.getElementById('tasks').innerHTML = `<div class="meta">daemon 不可达：${escapeHtml(e.message)}</div>`;
       }
@@ -171,6 +189,23 @@
       } catch (e) {
         document.getElementById('roles').innerHTML = `<div class="meta">${escapeHtml(e.message)}</div>`;
       }
+      try {
+        const cfg = await api(DAEMON, '/project/config');
+        document.getElementById('globalInstructions').value = cfg.config?.globalInstructions || '';
+        document.getElementById('defaultSkills').value = (cfg.config?.defaultSkills || []).join(', ');
+      } catch {}
+      try {
+        const experts = await api(DAEMON, '/experts');
+        document.getElementById('experts').innerHTML = (experts.experts || []).map(e =>
+          `<div class="row"><div><strong>${escapeHtml(e.name)}</strong><div class="meta">${escapeHtml(e.positioning)}</div></div><div class="tag">${escapeHtml(e.id)}</div></div>`
+        ).join('') || '<div class="meta">无 Expert</div>';
+      } catch {}
+      try {
+        const skills = await api(DAEMON, '/skills');
+        document.getElementById('skills').innerHTML = (skills.skills || []).map(s =>
+          `<div class="row"><div><strong>${escapeHtml(s.name)}</strong><div class="meta">${escapeHtml(s.description || s.id)} · tools: ${escapeHtml((s.toolWhitelist||[]).join(','))}</div></div><div class="tag">skill</div></div>`
+        ).join('') || '<div class="meta">无 Skill（hive/skills/）</div>';
+      } catch {}
     }
 
     function escapeHtml(s) {
@@ -199,6 +234,20 @@
       try { await api(GATEWAY, '/logout', { method: 'POST' }); } catch {}
       sessionStorage.clear();
       location.reload();
+    });
+
+    document.getElementById('projectForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const skills = String(fd.get('defaultSkills') || '').split(',').map(s => s.trim()).filter(Boolean);
+      await api(DAEMON, '/project/config', {
+        method: 'PUT',
+        body: JSON.stringify({
+          globalInstructions: String(fd.get('globalInstructions') || ''),
+          defaultSkills: skills
+        })
+      });
+      refreshBoard();
     });
 
     document.getElementById('roleForm').addEventListener('submit', async (e) => {

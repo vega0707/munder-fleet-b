@@ -18,8 +18,9 @@ export async function tryCreateNodePtyBackend(): Promise<PtyBackend | null> {
           cwd: opts.cwd ?? process.cwd(),
           env
         });
+        const id = randomUUID();
         return {
-          id: randomUUID(),
+          id,
           pid: proc.pid,
           write: (data: string) => proc.write(data),
           resize: (cols: number, rows: number) => proc.resize(cols, rows),
@@ -29,6 +30,9 @@ export async function tryCreateNodePtyBackend(): Promise<PtyBackend | null> {
             } catch {
               /* noop */
             }
+          },
+          onData: (callback: (data: string) => void) => {
+            proc.onData(callback);
           }
         };
       }

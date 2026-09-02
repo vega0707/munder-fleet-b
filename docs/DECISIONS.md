@@ -31,3 +31,10 @@
 - 模块化借 A：企业 auth/SSO/realtime/Team MCP 可从 Aion 移植，不 fork 整仓 AionCore 作主后端。
 - 不以 D（Multica 主核）追 WorkBuddy：Multica 偏 dev fleet 接活 + 许可限制 SaaS；claim 语义已协议对齐，无需升主核。
 - P4 里程碑写入 `docs/ROADMAP.md`；仍遵守单一 Fleet 协议、Munder 品牌、Multica 不 vendor。
+
+## 2026-09-02 — Plan 额度调度（per-plan，无全仓默认）
+
+- 每个 coding plan 独立配置在 `hive/plans.json`；**无 fleet 级默认额度规则**。
+- `limits` 全可选：不配 proactive 规则时，仅依赖 CLI 被动 rate-limit（`POST /quota/rate-limit`）。
+- `QuotaScheduler` 冷却到期后自动 `AutoClaim` 积压任务；多 plan 时按剩余 headroom 选 runtime。
+- PTY / Hook 输出自动 `parseRateLimitSignal`；`autoTune.enabled` 的 plan 从观测动态改写 `limits`（写入 `plan-tune-observations.json`）。

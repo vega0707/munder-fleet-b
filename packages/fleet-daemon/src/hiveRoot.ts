@@ -36,6 +36,8 @@ export class HiveRoot {
     const hive = this.hiveDir();
     mkdirSync(join(hive, 'agents'), { recursive: true });
     mkdirSync(join(hive, 'bin', 'runtime'), { recursive: true });
+    mkdirSync(join(hive, 'skills'), { recursive: true });
+    mkdirSync(join(hive, 'artifacts'), { recursive: true });
     const tasks = join(hive, 'tasks.json');
     if (!existsSync(tasks)) writeFileSync(tasks, '[]\n', 'utf8');
     const registry = join(hive, 'registry.json');

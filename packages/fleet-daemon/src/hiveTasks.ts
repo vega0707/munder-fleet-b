@@ -22,7 +22,14 @@ function normalizeTask(raw: Record<string, unknown>): HiveTask {
     dependsOn: Array.isArray(raw.dependsOn) ? raw.dependsOn.map(String) : [],
     priority: typeof raw.priority === 'number' ? raw.priority : 0,
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
-    result: typeof raw.result === 'string' ? raw.result : undefined
+    result: typeof raw.result === 'string' ? raw.result : undefined,
+    expertId: typeof raw.expertId === 'string' ? raw.expertId : undefined,
+    skillIds: Array.isArray(raw.skillIds) ? raw.skillIds.map(String) : undefined,
+    connectorIds: Array.isArray(raw.connectorIds) ? raw.connectorIds.map(String) : undefined,
+    parentTaskId: typeof raw.parentTaskId === 'string' ? raw.parentTaskId : undefined,
+    injectedInstructions:
+      typeof raw.injectedInstructions === 'string' ? raw.injectedInstructions : undefined,
+    artifactIds: Array.isArray(raw.artifactIds) ? raw.artifactIds.map(String) : undefined
   };
 }
 

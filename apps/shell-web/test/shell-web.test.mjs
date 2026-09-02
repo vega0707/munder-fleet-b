@@ -13,5 +13,7 @@ test('shell-web points at fleet-gateway login and board surfaces', () => {
   assert.match(html, /Fleet/);
   assert.match(html, /Assignee/);
   assert.match(html, /PendingDecision/);
+  assert.match(html, /Project 配置/);
+  assert.match(html, /Expert · Skill/);
   assert.match(html, /角色注册/);
 });

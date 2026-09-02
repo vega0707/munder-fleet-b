@@ -14,7 +14,7 @@ export interface EnsureLocalOpts {
   deviceName: string;
   launchedBy?: 'electron' | 'cli' | 'test';
   /** Discovered CLI providers; empty → placeholder offline runtime still registered. */
-  providers?: Array<{ name: string; provider: string; version?: string }>;
+  providers?: Array<{ name: string; provider: string; version?: string; planId?: string }>;
   ownerUserId?: string;
   now?: number;
 }
@@ -48,7 +48,8 @@ export class RuntimeRegistry {
         version: p.version,
         status: 'online',
         lastSeenAt: now,
-        ownerUserId: existing?.ownerUserId ?? ownerUserId
+        ownerUserId: existing?.ownerUserId ?? ownerUserId,
+        planId: p.planId ?? existing?.planId
       };
       this.runtimes.set(id, record);
       out.push(record);

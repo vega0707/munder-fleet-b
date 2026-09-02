@@ -15,10 +15,14 @@ import {
   LOCAL_DEFAULT_USER,
   type AuthIdentityMode,
   type AuthStatus,
+  type ConnectorRef,
   type FleetUser,
   type LoginResponse
 } from '@munder/fleet-protocol';
 import { SessionStore } from './sessionStore.js';
+import { ConnectorRegistry } from './connectorRegistry.js';
+import { AuditLog } from './auditLog.js';
+import { UsageMeter } from './usageMeter.js';
 
 export const SESSION_COOKIE = 'fleet-session';
 export const CSRF_COOKIE = 'fleet-csrf-token';
@@ -38,6 +42,9 @@ export interface GatewayOpts {
 export class FleetGateway {
   readonly store: SessionStore;
   readonly identityMode: AuthIdentityMode;
+  readonly connectors = new ConnectorRegistry();
+  readonly audit = new AuditLog();
+  readonly usage = new UsageMeter();
   private server: Server | undefined;
   private readonly daemonUrl: string | undefined;
   private readonly host: string;
@@ -266,6 +273,50 @@ export class FleetGateway {
         const user = this.requireUser(req, res);
         if (!user) return;
         return sendJson(res, 200, { user });
+      }
+
+      const userForMeter = this.resolveUser(req);
+      if (userForMeter && path.startsWith('/api/')) {
+        this.usage.increment(userForMeter.id);
+      }
+
+      if (req.method === 'GET' && path === '/api/connectors') {
+        const user = this.requireUser(req, res);
+        if (!user) return;
+        return sendJson(res, 200, { connectors: this.connectors.list() });
+      }
+
+      if (req.method === 'POST' && path === '/api/connectors') {
+        const user = this.requireUser(req, res);
+        if (!user) return;
+        const body = JSON.parse(await readBody(req)) as {
+          id?: string;
+          name?: string;
+          kind?: ConnectorRef['kind'];
+          config?: Record<string, string>;
+          enabled?: boolean;
+        };
+        const connector = this.connectors.register({
+          id: body.id ?? `conn_${randomBytes(4).toString('hex')}`,
+          name: body.name ?? 'connector',
+          kind: body.kind ?? 'mcp',
+          config: body.config,
+          enabled: body.enabled
+        });
+        this.audit.record(user.id, 'connector.register', connector.id);
+        return sendJson(res, 200, { connector });
+      }
+
+      if (req.method === 'GET' && path === '/api/audit') {
+        const user = this.requireUser(req, res);
+        if (!user) return;
+        return sendJson(res, 200, { events: this.audit.list() });
+      }
+
+      if (req.method === 'GET' && path === '/api/usage') {
+        const user = this.requireUser(req, res);
+        if (!user) return;
+        return sendJson(res, 200, { usage: this.usage.snapshot(), self: this.usage.get(user.id) });
       }
 
       if (this.daemonUrl && path.startsWith('/api/daemon/')) {

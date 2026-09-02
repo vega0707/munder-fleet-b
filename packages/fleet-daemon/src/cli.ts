@@ -8,7 +8,7 @@
 import { createServer } from 'node:http';
 import { FleetDaemon } from './daemon.js';
 import { BusyError, NotFoundError } from './decisionGate.js';
-import { ClaimConflictError, ClaimStaleError } from './claimService.js';
+import { ClaimConflictError, ClaimStaleError, PlanQuotaExhaustedError } from './claimService.js';
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name);
@@ -125,12 +125,89 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/mail/route') {
       return json(200, { delivered: daemon.mail.routeOnce() });
     }
+    if (req.method === 'GET' && url.pathname === '/project/config') {
+      return json(200, { config: daemon.getProjectConfig() });
+    }
+    if (req.method === 'PUT' && url.pathname === '/project/config') {
+      const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
+      return json(200, { config: daemon.updateProjectConfig(body) });
+    }
+    if (req.method === 'GET' && url.pathname === '/experts') {
+      return json(200, { experts: daemon.listExperts() });
+    }
+    if (req.method === 'POST' && url.pathname === '/experts') {
+      const body = JSON.parse(await readBody(req));
+      return json(200, { expert: daemon.upsertExpert(body) });
+    }
+    if (req.method === 'GET' && url.pathname === '/skills') {
+      return json(200, { skills: daemon.listSkills() });
+    }
+    if (req.method === 'POST' && url.pathname === '/skills/reload') {
+      return json(200, { skills: daemon.reloadSkills() });
+    }
+    if (req.method === 'POST' && url.pathname === '/orchestrate/split') {
+      const body = JSON.parse(await readBody(req)) as {
+        parentId?: string;
+        subtasks?: Parameters<typeof daemon.splitTask>[1];
+      };
+      return json(200, daemon.splitTask(body.parentId ?? '', body.subtasks ?? []));
+    }
+    if (req.method === 'GET' && url.pathname.match(/^\/tasks\/[^/]+\/artifacts$/)) {
+      const taskId = decodeURIComponent(url.pathname.split('/')[2]!);
+      return json(200, { artifacts: daemon.listArtifacts(taskId) });
+    }
+    if (req.method === 'POST' && url.pathname.match(/^\/tasks\/[^/]+\/artifacts$/)) {
+      const taskId = decodeURIComponent(url.pathname.split('/')[2]!);
+      const body = JSON.parse(await readBody(req)) as {
+        filename?: string;
+        content?: string;
+        mimeType?: string;
+      };
+      return json(200, {
+        artifact: daemon.writeArtifact(taskId, {
+          filename: body.filename ?? 'output.txt',
+          content: body.content ?? '',
+          mimeType: body.mimeType
+        })
+      });
+    }
+    if (req.method === 'GET' && url.pathname === '/memory') {
+      const userId = url.searchParams.get('userId') ?? undefined;
+      return json(200, { entries: daemon.listMemory(userId) });
+    }
+    if (req.method === 'PUT' && url.pathname === '/memory') {
+      const body = JSON.parse(await readBody(req)) as { userId?: string; key?: string; value?: string };
+      return json(200, {
+        entry: daemon.setMemory(body.userId ?? '', body.key ?? '', body.value ?? '')
+      });
+    }
+    if (req.method === 'GET' && url.pathname === '/plans') {
+      return json(200, { plans: daemon.listPlans() });
+    }
+    if (req.method === 'PUT' && url.pathname.startsWith('/plans/')) {
+      const planId = decodeURIComponent(url.pathname.slice('/plans/'.length));
+      const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
+      return json(200, { plan: daemon.upsertPlan({ ...body, planId } as Parameters<typeof daemon.upsertPlan>[0]) });
+    }
+    if (req.method === 'GET' && url.pathname === '/quota') {
+      return json(200, { quota: daemon.listQuota() });
+    }
+    if (req.method === 'POST' && url.pathname === '/quota/rate-limit') {
+      const body = JSON.parse(await readBody(req)) as { runtimeId?: string; signal?: string };
+      return json(200, { quota: daemon.reportRateLimit(body.runtimeId ?? '', body.signal ?? '') });
+    }
+    if (req.method === 'POST' && url.pathname === '/quota/resume-tick') {
+      return json(200, daemon.quotaResumeTick());
+    }
     return json(404, { error: 'not found' });
   } catch (e) {
     if (e instanceof BusyError) return json(409, { error: e.message });
     if (e instanceof NotFoundError) return json(404, { error: e.message });
     if (e instanceof ClaimStaleError || e instanceof ClaimConflictError) {
       return json(e.statusCode, { error: e.message });
+    }
+    if (e instanceof PlanQuotaExhaustedError) {
+      return json(409, { error: e.message, quota: e.snapshot });
     }
     console.error(e);
     return json(500, { error: e instanceof Error ? e.message : 'internal' });

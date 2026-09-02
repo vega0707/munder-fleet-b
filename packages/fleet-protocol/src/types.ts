@@ -48,6 +48,45 @@ export interface RuntimeRecord {
   status: RuntimeStatus;
   lastSeenAt: number;
   ownerUserId: string;
+  /** Links runtime to a plan budget config (hive/plans.json) */
+  planId?: string;
+}
+
+/**
+ * Per-plan proactive limits — all optional; omit `limits` to rely on passive rate-limit only.
+ * No fleet-wide defaults; each plan defines its own rules in hive/plans.json.
+ */
+export interface PlanLimits {
+  maxTasksPerWindow?: number;
+  windowMs?: number;
+  windowExhaustedCooldownMs?: number;
+  maxConsecutiveTasks?: number;
+  consecutiveCooldownMs?: number;
+  /** Used when CLI signals rate-limit without parseable retry-after */
+  rateLimitFallbackCooldownMs?: number;
+}
+
+export interface PlanBudgetConfig {
+  planId: string;
+  name?: string;
+  provider: string;
+  limits?: PlanLimits;
+}
+
+export type QuotaCooldownReason = 'window_exhausted' | 'consecutive_exhausted' | 'rate_limit';
+
+export interface RuntimeQuotaSnapshot {
+  runtimeId: string;
+  planId: string;
+  available: boolean;
+  cooldownUntil: number | null;
+  cooldownReason?: QuotaCooldownReason;
+  cooldownDetail?: string;
+  tasksInWindow: number;
+  consecutiveTasks: number;
+  windowStartedAt: number;
+  /** Remaining headroom in current window; null = unlimited */
+  windowHeadroom: number | null;
 }
 
 /** Multica claim freshness analogue (seconds). */

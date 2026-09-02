@@ -24,6 +24,9 @@ import { injectProjectContext, ProjectConfigStore } from './projectConfigStore.j
 import { RuntimeRegistry, type EnsureLocalOpts } from './runtimeRegistry.js';
 import { SkillLoader } from './skillLoader.js';
 import { TeamWakeScheduler } from './teamWake.js';
+import { PlanRegistry } from './planRegistry.js';
+import { QuotaLedger } from './quotaLedger.js';
+import { QuotaScheduler } from './quotaScheduler.js';
 import type {
   ArtifactRef,
   ExpertProfile,
@@ -32,7 +35,9 @@ import type {
   PendingDecision,
   ProjectConfig,
   RuntimeRecord,
-  SkillPackage
+  SkillPackage,
+  PlanBudgetConfig,
+  RuntimeQuotaSnapshot
 } from '@munder/fleet-protocol';
 
 export interface FleetDaemonOpts {
@@ -47,6 +52,8 @@ export interface FleetDaemonOpts {
   ownerUserId?: string;
   enableHooks?: boolean;
   preferNodePty?: boolean;
+  /** Quota resume + auto-claim poll interval; 0 disables (default 30s). */
+  quotaTickMs?: number;
 }
 
 export class FleetDaemon {
@@ -68,6 +75,9 @@ export class FleetDaemon {
   readonly orchestrator = new Orchestrator();
   readonly artifacts: ArtifactStore;
   readonly memory: MemoryStore;
+  readonly plans: PlanRegistry;
+  readonly quota: QuotaLedger;
+  private quotaScheduler: QuotaScheduler | undefined;
   hooks: HookServer | undefined;
   private info: DaemonInfo | undefined;
   private started = false;
@@ -83,12 +93,25 @@ export class FleetDaemon {
     const hiveDir = taskDir ?? this.hive.hiveDir();
     this.pty = new PtyManager({ backend: opts.ptyBackend });
     this.tasks = new HiveTaskStore(taskDir);
-    this.claims = new ClaimService(this.runtimes);
+    this.plans = new PlanRegistry(hiveDir);
+    this.quota = new QuotaLedger(hiveDir, this.plans, this.runtimes);
+    this.claims = new ClaimService(this.runtimes, this.quota);
     this.mail = new HiveMailRouter(this.hive);
     this.autoClaim = new AutoClaimLoop({
       claims: this.claims,
       blockers: this.blockers,
       listTasks: () => this.tasks.list()
+    });
+    this.quotaScheduler = new QuotaScheduler({
+      quota: this.quota,
+      autoClaim: this.autoClaim,
+      tickMs: opts.quotaTickMs ?? 30_000,
+      onResume: (resumed, result) => {
+        this.metrics.event('quota.resume', {
+          resumed: resumed.length,
+          claimed: result.claimed.length
+        });
+      }
     });
     this.experts = new ExpertRegistry(hiveDir);
     this.skills = new SkillLoader(hiveDir);
@@ -147,6 +170,7 @@ export class FleetDaemon {
     this.started = true;
     this.metrics.event('daemon.start', { daemonId, runtimes: runtimes.length });
     this.skills.reload();
+    this.quotaScheduler?.start();
     return { info: this.info, runtimes };
   }
 
@@ -159,6 +183,7 @@ export class FleetDaemon {
   }
 
   stop(): void {
+    this.quotaScheduler?.stop();
     this.hooks?.stop();
     this.hooks = undefined;
     for (const p of this.pty.list()) {
@@ -324,6 +349,32 @@ export class FleetDaemon {
 
   listMemory(userId?: string): MemoryEntry[] {
     return this.memory.list(userId);
+  }
+
+  listPlans(): PlanBudgetConfig[] {
+    return this.plans.list();
+  }
+
+  upsertPlan(plan: PlanBudgetConfig): PlanBudgetConfig {
+    this.ensureStarted();
+    return this.plans.upsert(plan);
+  }
+
+  listQuota(now?: number): RuntimeQuotaSnapshot[] {
+    return this.quota.listSnapshots(now);
+  }
+
+  reportRateLimit(runtimeId: string, signal: string): RuntimeQuotaSnapshot | null {
+    this.ensureStarted();
+    const snap = this.quota.applyRateLimitSignal(runtimeId, signal);
+    if (snap) this.metrics.event('quota.rate_limit', { runtimeId, planId: snap.planId });
+    return snap;
+  }
+
+  /** Manual quota scheduler tick (also runs on interval). */
+  quotaResumeTick(): { resumed: string[]; claim: ReturnType<AutoClaimLoop['tick']> } {
+    this.ensureStarted();
+    return this.quotaScheduler!.tick();
   }
 
   listTasks(): HiveTask[] {

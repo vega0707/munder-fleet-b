@@ -8,7 +8,7 @@
 import { createServer } from 'node:http';
 import { FleetDaemon } from './daemon.js';
 import { BusyError, NotFoundError } from './decisionGate.js';
-import { ClaimConflictError, ClaimStaleError } from './claimService.js';
+import { ClaimConflictError, ClaimStaleError, PlanQuotaExhaustedError } from './claimService.js';
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name);
@@ -181,12 +181,33 @@ const server = createServer(async (req, res) => {
         entry: daemon.setMemory(body.userId ?? '', body.key ?? '', body.value ?? '')
       });
     }
+    if (req.method === 'GET' && url.pathname === '/plans') {
+      return json(200, { plans: daemon.listPlans() });
+    }
+    if (req.method === 'PUT' && url.pathname.startsWith('/plans/')) {
+      const planId = decodeURIComponent(url.pathname.slice('/plans/'.length));
+      const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
+      return json(200, { plan: daemon.upsertPlan({ ...body, planId } as Parameters<typeof daemon.upsertPlan>[0]) });
+    }
+    if (req.method === 'GET' && url.pathname === '/quota') {
+      return json(200, { quota: daemon.listQuota() });
+    }
+    if (req.method === 'POST' && url.pathname === '/quota/rate-limit') {
+      const body = JSON.parse(await readBody(req)) as { runtimeId?: string; signal?: string };
+      return json(200, { quota: daemon.reportRateLimit(body.runtimeId ?? '', body.signal ?? '') });
+    }
+    if (req.method === 'POST' && url.pathname === '/quota/resume-tick') {
+      return json(200, daemon.quotaResumeTick());
+    }
     return json(404, { error: 'not found' });
   } catch (e) {
     if (e instanceof BusyError) return json(409, { error: e.message });
     if (e instanceof NotFoundError) return json(404, { error: e.message });
     if (e instanceof ClaimStaleError || e instanceof ClaimConflictError) {
       return json(e.statusCode, { error: e.message });
+    }
+    if (e instanceof PlanQuotaExhaustedError) {
+      return json(409, { error: e.message, quota: e.snapshot });
     }
     console.error(e);
     return json(500, { error: e instanceof Error ? e.message : 'internal' });
